@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Merry Christmas , ENG.Mina AbuSeifen</title>
 <style>
   :root{
@@ -12,19 +12,21 @@
     --accent:#4aa07a;
     --muted:#41605a;
   }
-  html,body{height:100%;margin:0}
-  body{display:flex;align-items:center;justify-content:center;background:linear-gradient(180deg,var(--bg),#dff4ee);font-family:Inter, system-ui, Arial;color:var(--muted)}
-  .wrap{width:min(720px,96vw);max-width:720px;padding:18px}
-  h1{margin:0 0 10px 0;font-size:18px}
-  canvas{display:block;width:100%;height:640px;border-radius:12px;box-shadow:0 10px 30px rgba(60,110,95,0.12);background:linear-gradient(180deg, rgba(255,255,255,0.25), transparent)}
-  .hud{display:flex;gap:12px;align-items:center;justify-content:space-between;margin-top:8px}
+  html,body{height:100%;margin:0;padding:0}
+  body{display:flex;flex-direction:column;align-items:center;justify-content:center;background:linear-gradient(180deg,var(--bg),#dff4ee);font-family:Inter, system-ui, Arial;color:var(--muted)}
+  .wrap{width:min(720px,100vw);max-width:720px;padding:18px;box-sizing:border-box}
+  h1{margin:0 0 10px 0;font-size:18px;text-align:center}
+  canvas{display:block;width:100%;height:auto;max-height:640px;border-radius:12px;box-shadow:0 10px 30px rgba(60,110,95,0.12);background:linear-gradient(180deg, rgba(255,255,255,0.25), transparent)}
+  .hud{display:flex;gap:12px;align-items:center;justify-content:space-between;margin-top:8px;flex-wrap:wrap}
   .controls{display:flex;gap:8px}
   button{background:var(--accent);color:white;border:0;padding:8px 12px;border-radius:8px;cursor:pointer;font-weight:600}
   button.ghost{background:transparent;color:var(--muted);border:1px solid rgba(65,96,90,0.08)}
   .panel{background:rgba(255,255,255,0.7);padding:10px;border-radius:8px;display:flex;gap:8px;align-items:center}
   .muted{color:var(--muted);font-size:13px}
   .center{display:flex;gap:8px;align-items:center}
-  @media (max-width:520px){canvas{height:520px}}
+  #jumpBtn{position:fixed;bottom:20px;right:20px;width:60px;height:60px;border-radius:50%;background:var(--accent);color:white;font-size:12px;border:0;z-index:10;display:none}
+  @media (max-width:768px){#jumpBtn{display:block}}
+  @media (max-width:520px){canvas{max-height:520px}}
 </style>
 </head>
 <body>
@@ -46,6 +48,7 @@
       </div>
     </div>
   </div>
+  <button id="jumpBtn">Jump</button>
 
 <script>
 /*
@@ -67,13 +70,35 @@
 // Canvas setup
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
-const W = canvas.width;
-const H = canvas.height;
+let W = canvas.width;
+let H = canvas.height;
 
 // UI
 const scoreEl = document.getElementById('score');
 const startBtn = document.getElementById('start');
 const restartBtn = document.getElementById('restart');
+const jumpBtn = document.getElementById('jumpBtn');
+
+// Jump function for both desktop and mobile
+function jump() {
+  if(!gameOver && player.canJump){
+    player.vy = JUMP_VELOCITY;
+    player.canJump = false;
+    spawnJumpBurst();
+    spawnGiftsOnJump();
+    try{
+      const now = performance.now();
+      if(jumpSound && typeof jumpSound.play === 'function'){
+        if(jumpSound.paused){ jumpSound.currentTime = 0; jumpSound.play().catch(()=>{}); }
+        else { jumpSound.currentTime = 0; }
+      }
+      lastJumpSound = now;
+    }catch(e){}
+  }
+  if(gameOver){
+    startGame();
+  }
+}
 
 // Game constants
 const GRAVITY = 0.45;            // gravity acceleration
@@ -135,7 +160,7 @@ const bgCtx = bgCanvas.getContext('2d');
 let bgImageLoaded = false;
 const bgImg = new Image();
 bgImg.src = 'christmas-bg.jpg';
-bgImg.onload = () => { bgCtx.drawImage(bgImg,0,0,W,H); bgImageLoaded = true; };
+bgImg.onload = () => { bgImageLoaded = true; resizeCanvas(); };
 
 // Santa gift image (box) - load with onload/onerror flags
 const giftImg = new Image();
@@ -150,6 +175,31 @@ let santaImgLoaded = false;
 santaImg.src = './santa.png';
 santaImg.onload = () => { santaImgLoaded = true; };
 santaImg.onerror = () => { santaImgLoaded = false; };
+
+// Resize canvas to match CSS size
+function resizeCanvas() {
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width;
+  canvas.height = rect.height;
+  W = canvas.width;
+  H = canvas.height;
+  // Update background canvas
+  bgCanvas.width = W;
+  bgCanvas.height = H;
+  if(bgImageLoaded){
+    bgCtx.drawImage(bgImg,0,0,W,H);
+  } else {
+    drawChristmasBackground();
+  }
+  // If game is running, reset to adapt to new size
+  if(running){
+    resetGame();
+  }
+}
+
+// Initial resize
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
 
 // Santa system state and timing
 const SANTA_MIN_INTERVAL_MS = 10000; // 10s
@@ -747,34 +797,22 @@ function loop(time){
 window.addEventListener('keydown', (e)=>{
   if(e.code === 'ArrowLeft' || e.code === 'KeyA') keys.left = true;
   if(e.code === 'ArrowRight' || e.code === 'KeyD') keys.right = true;
-  // Jump when SPACE or ArrowUp and player is allowed to jump (prevent double jump)
-  if((e.code === 'Space' || e.code === 'ArrowUp') && !gameOver){
-    if(player.canJump){
-      player.vy = JUMP_VELOCITY; // strong responsive jump
-      player.canJump = false;   // prevent double jump until landing
-      // spawn jump visual effects
-      spawnJumpBurst();
-      spawnGiftsOnJump();
-      // play jump sound without overlapping: restart audio if already playing
-      try{
-        const now = performance.now();
-        if(jumpSound && typeof jumpSound.play === 'function'){
-          if(jumpSound.paused){ jumpSound.currentTime = 0; jumpSound.play().catch(()=>{}); }
-          else { jumpSound.currentTime = 0; /* restart without creating overlap */ }
-        }
-        lastJumpSound = now;
-      }catch(e){ /* ignore audio errors */ }
-    }
-  }
-  // If game is over, SPACE/Up can restart
-  if((e.code === 'Space' || e.code === 'ArrowUp') && gameOver){
-    startGame();
+  // Jump when SPACE or ArrowUp
+  if(e.code === 'Space' || e.code === 'ArrowUp'){
+    jump();
   }
 });
 window.addEventListener('keyup', (e)=>{
   if(e.code === 'ArrowLeft' || e.code === 'KeyA') keys.left = false;
   if(e.code === 'ArrowRight' || e.code === 'KeyD') keys.right = false;
 });
+
+// Touch controls for mobile
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  jump();
+});
+jumpBtn.addEventListener('click', jump);
 
 // UI wiring
 startBtn.addEventListener('click', ()=>{ startGame(); startBtn.disabled = true; });
