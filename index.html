@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=0" />
 <title>Merry Christmas , ENG.Mina AbuSeifen</title>
 <style>
   :root{
@@ -12,21 +12,18 @@
     --accent:#4aa07a;
     --muted:#41605a;
   }
-  html,body{height:100%;margin:0;padding:0}
-  body{display:flex;flex-direction:column;align-items:center;justify-content:center;background:linear-gradient(180deg,var(--bg),#dff4ee);font-family:Inter, system-ui, Arial;color:var(--muted)}
-  .wrap{width:min(720px,100vw);max-width:720px;padding:18px;box-sizing:border-box}
+  html,body{height:100%;margin:0;overflow:hidden;touch-action:none;}
+  body{display:flex;align-items:center;justify-content:center;background:linear-gradient(180deg,var(--bg),#dff4ee);font-family:Inter, system-ui, Arial;color:var(--muted)}
+  .wrap{width:min(720px,98vw);max-width:720px;padding:10px;box-sizing:border-box}
   h1{margin:0 0 10px 0;font-size:18px;text-align:center}
-  canvas{display:block;width:100%;height:auto;max-height:640px;border-radius:12px;box-shadow:0 10px 30px rgba(60,110,95,0.12);background:linear-gradient(180deg, rgba(255,255,255,0.25), transparent)}
-  .hud{display:flex;gap:12px;align-items:center;justify-content:space-between;margin-top:8px;flex-wrap:wrap}
+  canvas{display:block;width:100%;height:auto;aspect-ratio:720/640;border-radius:12px;box-shadow:0 10px 30px rgba(60,110,95,0.12);background:linear-gradient(180deg, rgba(255,255,255,0.25), transparent);touch-action:none}
+  .hud{display:flex;gap:12px;align-items:center;justify-content:space-between;margin-top:8px}
   .controls{display:flex;gap:8px}
   button{background:var(--accent);color:white;border:0;padding:8px 12px;border-radius:8px;cursor:pointer;font-weight:600}
   button.ghost{background:transparent;color:var(--muted);border:1px solid rgba(65,96,90,0.08)}
   .panel{background:rgba(255,255,255,0.7);padding:10px;border-radius:8px;display:flex;gap:8px;align-items:center}
   .muted{color:var(--muted);font-size:13px}
-  .center{display:flex;gap:8px;align-items:center}
-  #jumpBtn{position:fixed;bottom:20px;right:20px;width:60px;height:60px;border-radius:50%;background:var(--accent);color:white;font-size:12px;border:0;z-index:10;display:none}
-  @media (max-width:768px){#jumpBtn{display:block}}
-  @media (max-width:520px){canvas{max-height:520px}}
+  @media (max-width:520px){ h1{font-size:14px} .muted{font-size:11px} }
 </style>
 </head>
 <body>
@@ -37,800 +34,294 @@
       <div class="panel">
         <div class="muted">Score:</div><div id="score">0</div>
       </div>
-      <div class="panel center">
-        <div class="muted">Left/Right:</div>
-        <div class="muted">← →</div>
-        <div style="margin-left:10px; font-size:13px; color:var(--muted)">Space or Up to restart after Game Over</div>
-      </div>
       <div class="controls">
         <button id="start">Start</button>
         <button id="restart" class="ghost">Restart</button>
       </div>
     </div>
   </div>
-  <button id="jumpBtn">Jump</button>
 
 <script>
-/*
-  Monkey Jump
-  - Pure HTML/CSS/Vanilla JS
-  - Canvas rendering
-  - Monkey auto-jumps (vertical physics) and player moves left/right with arrows
-  - Procedural platforms, collision detection, scoring by climb
-  - Restart after game over
-
-  Structure:
-  - Game constants and state
-  - Game loop (requestAnimationFrame)
-  - Physics and collision
-  - Platform generation and recycling
-  - Input handling and UI
-*/
-
-// Canvas setup
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
-let W = canvas.width;
-let H = canvas.height;
+const W = canvas.width;
+const H = canvas.height;
 
-// UI
 const scoreEl = document.getElementById('score');
 const startBtn = document.getElementById('start');
 const restartBtn = document.getElementById('restart');
-const jumpBtn = document.getElementById('jumpBtn');
 
-// Jump function for both desktop and mobile
-function jump() {
-  if(!gameOver && player.canJump){
-    player.vy = JUMP_VELOCITY;
-    player.canJump = false;
-    spawnJumpBurst();
-    spawnGiftsOnJump();
-    try{
-      const now = performance.now();
-      if(jumpSound && typeof jumpSound.play === 'function'){
-        if(jumpSound.paused){ jumpSound.currentTime = 0; jumpSound.play().catch(()=>{}); }
-        else { jumpSound.currentTime = 0; }
-      }
-      lastJumpSound = now;
-    }catch(e){}
-  }
-  if(gameOver){
-    startGame();
-  }
-}
-
-// Game constants
-const GRAVITY = 0.45;            // gravity acceleration
-const JUMP_VELOCITY = -12.5;     // upward impulse when jumping (stronger)
-const H_SPEED = 3.6;             // horizontal speed (player-controlled)
-const MAX_PLATFORMS = 10;        // how many platforms in view
+const GRAVITY = 0.45;
+const JUMP_VELOCITY = -12.5;
+const H_SPEED = 3.6;
+const MAX_PLATFORMS = 10;
 const PLATFORM_WIDTH = 100;
 const PLATFORM_HEIGHT = 14;
-const PLATFORM_GAP_MIN = 60;     // min vertical distance between platforms
-const PLATFORM_GAP_MAX = 110;    // max vertical distance
-const START_Y = H - 120;         // initial monkey y position
+const PLATFORM_GAP_MIN = 60;
+const PLATFORM_GAP_MAX = 110;
+const START_Y = H - 120;
 
-// Monkey (player) object
 const player = {
-  x: W * 0.5,
-  y: START_Y,
-  vx: 0,
-  vy: 0,
-  // width/height used for collision and drawing (fallback circle uses radius)
-  w: 36,
-  h: 36,
-  radius: 18,
-  isAlive: true,
-  canJump: false,      // allow jump only when on a platform
-  img: null,           // player image
-  imgLoaded: false
+  x: W * 0.5, y: START_Y, vx: 0, vy: 0, w: 36, h: 36, radius: 18,
+  isAlive: true, canJump: false, img: null, imgLoaded: false
 };
 
-// Load player image and handle fallback
 (() => {
   const img = new Image();
   img.src = 'player.jpeg';
   img.onload = () => {
-    player.img = img;
-    player.imgLoaded = true;
-    // scale image to a comfortable in-game size while preserving aspect
-    const targetW = 48;
-    const aspect = img.height / img.width || 1;
-    player.w = targetW;
-    player.h = Math.round(targetW * aspect);
+    player.img = img; player.imgLoaded = true;
+    const targetW = 48; const aspect = img.height / img.width || 1;
+    player.w = targetW; player.h = Math.round(targetW * aspect);
     player.radius = Math.max(player.w, player.h) * 0.5;
-  };
-  img.onerror = () => {
-    // image failed to load — keep using fallback shapes
-    player.imgLoaded = false;
-    player.img = null;
   };
 })();
 
-// Jump sound (HTML5 Audio). Uses single element to avoid overlapping.
 const jumpSound = new Audio('jump.wav');
 let lastJumpSound = 0;
-const minJumpSoundInterval = 120; // ms
+const minJumpSoundInterval = 120;
 
-// Christmas background buffer: draw once to offscreen canvas for performance
 const bgCanvas = document.createElement('canvas');
 bgCanvas.width = W; bgCanvas.height = H;
 const bgCtx = bgCanvas.getContext('2d');
 let bgImageLoaded = false;
 const bgImg = new Image();
 bgImg.src = 'christmas-bg.jpg';
-bgImg.onload = () => { bgImageLoaded = true; resizeCanvas(); };
+bgImg.onload = () => { bgCtx.drawImage(bgImg,0,0,W,H); bgImageLoaded = true; };
 
-// Santa gift image (box) - load with onload/onerror flags
 const giftImg = new Image();
 let giftImgLoaded = false;
 giftImg.src = 'santa-gift.jpg';
 giftImg.onload = () => { giftImgLoaded = true; };
-giftImg.onerror = () => { giftImgLoaded = false; };
 
-// Santa sprite (optional) - will fall back to drawn cartoon if missing
 const santaImg = new Image();
 let santaImgLoaded = false;
 santaImg.src = './santa.png';
 santaImg.onload = () => { santaImgLoaded = true; };
-santaImg.onerror = () => { santaImgLoaded = false; };
 
-// Resize canvas to match CSS size
-function resizeCanvas() {
-  const rect = canvas.getBoundingClientRect();
-  canvas.width = rect.width;
-  canvas.height = rect.height;
-  W = canvas.width;
-  H = canvas.height;
-  // Update background canvas
-  bgCanvas.width = W;
-  bgCanvas.height = H;
-  if(bgImageLoaded){
-    bgCtx.drawImage(bgImg,0,0,W,H);
-  } else {
-    drawChristmasBackground();
-  }
-  // If game is running, reset to adapt to new size
-  if(running){
-    resetGame();
-  }
-}
-
-// Initial resize
-resizeCanvas();
-window.addEventListener('resize', resizeCanvas);
-
-// Santa system state and timing
-const SANTA_MIN_INTERVAL_MS = 10000; // 10s
-const SANTA_MAX_INTERVAL_MS = 20000; // 20s
-const SANTA_SPEED = 160; // px per second approximate
+const SANTA_MIN_INTERVAL_MS = 10000;
+const SANTA_MAX_INTERVAL_MS = 20000;
+const SANTA_SPEED = 160;
 let santa = { active:false, x:0, y:0, vx:0, vy:0, side:'left', targetX:0, targetY:0 };
-let santaTimer = 0; // ms elapsed since last schedule
+let santaTimer = 0;
 let santaNextIn = rand(SANTA_MIN_INTERVAL_MS, SANTA_MAX_INTERVAL_MS);
 
 function scheduleNextSanta(){ santaTimer = 0; santaNextIn = rand(SANTA_MIN_INTERVAL_MS, SANTA_MAX_INTERVAL_MS); }
 
 function spawnSanta(){
-  // choose side and initial offscreen x
   const fromLeft = Math.random() < 0.5;
   santa.side = fromLeft ? 'left' : 'right';
   santa.x = fromLeft ? -80 : W + 80;
-  // spawn approximately at mid-screen height relative to camera
-  const minY = cameraY + 80;
-  const maxY = cameraY + Math.max(120, H - 200);
+  const minY = cameraY + 80; const maxY = cameraY + Math.max(120, H - 200);
   santa.y = rand(minY, maxY);
-  santa.targetX = player.x;
-  santa.targetY = player.y;
+  santa.targetX = player.x; santa.targetY = player.y;
   santa.active = true;
 }
 
 function giveSantaGift(){
-  // Santa hands a gift: spawn a collectible near player immediately
-  const gx = player.x + (Math.random()*40 - 20);
-  const gy = player.y - 8;
+  const gx = player.x + (Math.random()*40 - 20); const gy = player.y - 8;
   const r = 10 + Math.random()*6;
-  const value = 80; // reward for Santa gift
-  gifts.push({x: gx, y: gy, vx: (Math.random()-0.5)*0.6, vy: -0.8 - Math.random()*0.6, life: 2200, ttl: 2200, r: r, value: value, type: 'box'});
-  // immediate score bump as part of the interaction
-  score += value;
-  updateScore();
-  // sparkle/pop effect around player
+  gifts.push({x: gx, y: gy, vx: (Math.random()-0.5)*0.6, vy: -0.8 - Math.random()*0.6, life: 2200, ttl: 2200, r: r, value: 80, type: 'box'});
+  score += 80; updateScore();
   for(let k=0;k<18;k++){
-    particles.push({x: player.x + (Math.random()-0.5)*20, y: player.y + (Math.random()-0.5)*20, vx:(Math.random()-0.5)*3, vy:(Math.random()-1.5)*3, life:200 + Math.random()*220, ttl:200 + Math.random()*220, size:1 + Math.random()*3, color: (Math.random()<0.6? 'rgba(255,240,180,0.98)' : 'rgba(180,240,255,0.95)')});
+    particles.push({x: player.x, y: player.y, vx:(Math.random()-0.5)*3, vy:(Math.random()-1.5)*3, life:200 + Math.random()*220, ttl:200 + Math.random()*220, size:1 + Math.random()*3, color: 'rgba(255,240,180,0.98)'});
   }
 }
 
 function updateSanta(dtMs){
   if(!santa.active){
-    // count timer for next spawn
-    santaTimer += dtMs;
-    if(santaTimer >= santaNextIn){ spawnSanta(); scheduleNextSanta(); }
+    santaTimer += dtMs; if(santaTimer >= santaNextIn){ spawnSanta(); scheduleNextSanta(); }
     return;
   }
-  // home toward current player position for smooth following
-  santa.targetX = player.x;
-  santa.targetY = player.y;
-  const dx = santa.targetX - santa.x;
-  const dy = santa.targetY - santa.y;
+  santa.targetX = player.x; santa.targetY = player.y;
+  const dx = santa.targetX - santa.x; const dy = santa.targetY - santa.y;
   const dist = Math.hypot(dx, dy) || 1;
   const move = SANTA_SPEED * (dtMs/1000);
-  // move proportionally, clamp to not overshoot
   santa.x += dx / dist * Math.min(move, dist);
   santa.y += dy / dist * Math.min(move, dist);
-  // check reach threshold (world-space)
-  const reachDist = Math.max(28, Math.min(60, player.radius + 12));
-  if(Math.hypot(santa.x - player.x, santa.y - player.y) <= reachDist){
-    // give gift and disappear
-    giveSantaGift();
-    santa.active = false;
-    return;
-  }
-  // if Santa travels off-screen far away, deactivate
+  if(Math.hypot(santa.x - player.x, santa.y - player.y) <= 40){ giveSantaGift(); santa.active = false; }
   if(santa.x < -160 || santa.x > W + 160) santa.active = false;
 }
 
 function renderSanta(ctx){
   if(!santa.active) return;
-  const sx = santa.x;
-  const sy = santa.y - cameraY; // draw relative to camera
+  const sx = santa.x, sy = santa.y - cameraY;
   ctx.save();
   ctx.translate(sx, sy);
-  // draw optional image if available
-  const sw = 56, sh = 56;
-  if(santaImgLoaded){
-    try{ ctx.drawImage(santaImg, -sw/2, -sh/2, sw, sh); }catch(e){}
-  } else {
-    // simple cartoon Santa: body, coat, face, hat
-    // shadow
-    ctx.fillStyle = 'rgba(0,0,0,0.06)'; ctx.beginPath(); ctx.ellipse(6, 18, 22, 10, 0, 0, Math.PI*2); ctx.fill();
-    // body (red coat)
-    ctx.fillStyle = '#d93030'; ctx.beginPath(); ctx.ellipse(0,0,20,22,0,0,Math.PI*2); ctx.fill();
-    // white trim
-    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.ellipse(0,10,20,6,0,0,Math.PI*2); ctx.fill();
-    // face
-    ctx.fillStyle = '#f7d6c0'; ctx.beginPath(); ctx.arc(0,-4,7,0,Math.PI*2); ctx.fill();
-    // beard
-    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(0,0,9,0,Math.PI); ctx.fill();
-    // hat
-    ctx.fillStyle = '#d93030'; ctx.beginPath(); ctx.moveTo(-12,-8); ctx.lineTo(0,-28); ctx.lineTo(12,-8); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(0,-28,4,0,Math.PI*2); ctx.fill();
-  }
+  if(santaImgLoaded){ try{ ctx.drawImage(santaImg, -28, -28, 56, 56); }catch(e){} }
+  else { ctx.fillStyle = '#d93030'; ctx.beginPath(); ctx.arc(0,0,20,0,Math.PI*2); ctx.fill(); }
   ctx.restore();
 }
 
-// If background image not available, draw a simple Christmas tree scene into bgCanvas
 function drawChristmasBackground(){
-  // clear
   bgCtx.clearRect(0,0,W,H);
-  // soft snowy sky
   const g = bgCtx.createLinearGradient(0,0,0,H);
-  g.addColorStop(0,'#f7fbff');
-  g.addColorStop(1,'#e6f7f5');
+  g.addColorStop(0,'#f7fbff'); g.addColorStop(1,'#e6f7f5');
   bgCtx.fillStyle = g; bgCtx.fillRect(0,0,W,H);
-
-  // draw simple static snow ground
-  bgCtx.fillStyle = '#ffffff';
-  bgCtx.fillRect(0, H-80, W, 80);
-
-  // draw a stylized tree on the left
-  const cx = 110, cy = H-120;
-  // trunk
-  bgCtx.fillStyle = '#6b3b2a';
-  bgCtx.fillRect(cx-12, cy+30, 24, 40);
-  // layers of green
-  for(let i=0;i<5;i++){
-    bgCtx.beginPath();
-    const w = 160 - i*24;
-    const topY = cy - i*28;
-    bgCtx.moveTo(cx - w/2, topY + 24);
-    bgCtx.lineTo(cx, topY - 18);
-    bgCtx.lineTo(cx + w/2, topY + 24);
-    bgCtx.closePath();
-    bgCtx.fillStyle = `hsl(${120 - i*6} 45% ${30 + i*6}%)`;
-    bgCtx.fill();
-  }
-  // star
-  bgCtx.fillStyle = '#ffec7a';
-  bgCtx.beginPath(); bgCtx.arc(cx, cy-120, 8, 0, Math.PI*2); bgCtx.fill();
+  bgCtx.fillStyle = '#ffffff'; bgCtx.fillRect(0, H-80, W, 80);
 }
-// draw fallback bg now (image may override when loaded)
 drawChristmasBackground();
 
-// Camera offset to simulate upward scrolling
-let cameraY = 0; // how much the world has scrolled up (positive means world moved up)
-let highestY = player.y; // track highest (smallest) world y reached for score
-let score = 0;
-let keys = {left:false,right:false};
-let platforms = [];
-let animId = null;
-let running = false;
-let gameOver = false;
+let cameraY = 0, highestY = player.y, score = 0, keys = {left:false,right:false}, platforms = [], particles = [], gifts = [], animId = null, running = false, gameOver = false, lastTime = 0, tGlobal = 0, deltaTimeMs = 16.67;
 
-// Utility: random range
 function rand(min, max){ return Math.random()*(max-min)+min; }
 
-// Initialize platforms: create a stable base and some random above
 function initPlatforms(){
   platforms = [];
-  // Ground-ish platform where player starts
-  platforms.push({x:W*0.5 - PLATFORM_WIDTH*0.5, y: START_Y + 40, w: PLATFORM_WIDTH, h: PLATFORM_HEIGHT, type:'static'});
-  let y = START_Y + 40 - rand(PLATFORM_GAP_MIN, PLATFORM_GAP_MAX);
+  platforms.push({x:W*0.5 - 50, y: START_Y + 40, w: 100, h: 14, type:'static'});
+  let y = START_Y + 40 - rand(60, 110);
   for(let i=1;i<MAX_PLATFORMS;i++){
-    const x = rand(20, W - PLATFORM_WIDTH - 20);
-    platforms.push({x, y, w: PLATFORM_WIDTH, h: PLATFORM_HEIGHT, type:'normal'});
+    platforms.push({x: rand(20, W - 120), y: y, w: 100, h: 14, type:'normal'});
     y -= rand(PLATFORM_GAP_MIN, PLATFORM_GAP_MAX);
   }
 }
 
-// Reset game state
 function resetGame(){
-  player.x = W*0.5;
-  player.y = START_Y;
-  player.vx = 0;
-  player.vy = 0;
-  player.isAlive = true;
-  cameraY = 0;
-  highestY = player.y;
-  score = 0;
-  gameOver = false;
-  updateScore();
-  initPlatforms();
-  // start with ability to jump (on the ground platform)
-  player.canJump = true;
-  // reset Santa schedule
-  santa.active = false;
-  scheduleNextSanta();
+  player.x = W*0.5; player.y = START_Y; player.vx = 0; player.vy = 0; player.isAlive = true;
+  cameraY = 0; highestY = player.y; score = 0; gameOver = false;
+  updateScore(); initPlatforms(); player.canJump = true;
+  santa.active = false; scheduleNextSanta();
 }
 
-// Start the game
-function startGame(){
-  if(running) return;
-  resetGame();
-  running = true;
-  animId = requestAnimationFrame(loop);
-}
+function startGame(){ if(running) return; resetGame(); running = true; animId = requestAnimationFrame(loop); }
+function endGame(){ gameOver = true; running = false; cancelAnimationFrame(animId); render(); }
 
-// End the game
-function endGame(){
-  gameOver = true;
-  running = false;
-  cancelAnimationFrame(animId);
-  // Show a gentle overlay using canvas or simple text
-  drawGameOver();
-}
-
-// Physics update: apply gravity and horizontal control
 function updatePhysics(dt){
-  // Horizontal control
-  if(keys.left){ player.vx = -H_SPEED; }
-  else if(keys.right){ player.vx = H_SPEED; }
-  else { player.vx = 0; }
-
-  // Apply velocities
+  if(keys.left) player.vx = -H_SPEED; else if(keys.right) player.vx = H_SPEED; else player.vx = 0;
   player.x += player.vx;
-  // store previous bottom to detect landing
   const prevBottom = player.y + player.h/2;
+  player.vy += GRAVITY; player.y += player.vy;
+  if(player.x < -20) player.x = W + 20; if(player.x > W + 20) player.x = -20;
 
-  player.vy += GRAVITY;
-  player.y += player.vy;
-
-  // Screen wrap horizontally for a forgiving feel (use player width)
-  const halfW = Math.max(player.radius, player.w/2);
-  if(player.x < -halfW) player.x = W + halfW;
-  if(player.x > W + halfW) player.x = -halfW;
-
-  // Collision with platforms: detect downward crossing of platform top
   if(player.vy >= 0){
     for(let p of platforms){
-      const platTop = p.y; // world y of platform top
-      const left = p.x - player.w/2;
-      const right = p.x + p.w + player.w/2;
-      const bottom = player.y + player.h/2;
-
-      // Check vertical crossing: previously above or at top, now at/below top
-      if(prevBottom <= platTop && bottom >= platTop && player.x > left && player.x < right){
-        // Land on platform: place player's bottom exactly on top
-        player.y = platTop - player.h/2;
-        player.vy = 0;
-        player.canJump = true; // enable jump now that player is grounded
-        break; // only handle one platform
+      if(prevBottom <= p.y && (player.y + player.h/2) >= p.y && player.x > p.x - 20 && player.x < p.x + p.w + 20){
+        player.y = p.y - player.h/2; player.vy = 0; player.canJump = true; break;
       }
     }
   }
-
-  // If player reaches above certain fraction of screen, scroll world up
-  const threshold = H * 0.35; // when player screen y is above threshold, move camera
-  const playerScreenY = player.y - cameraY;
-  if(playerScreenY < threshold){
-    const diff = threshold - playerScreenY;
-    cameraY -= diff; // move camera up (world shifts up)
-  }
-
-  // Update score based on highest climb (smaller y is higher in world coordinates)
+  const threshold = H * 0.35;
+  if(player.y - cameraY < threshold) cameraY = player.y - threshold;
   if(player.y < highestY) highestY = player.y;
   score = Math.max(0, Math.floor((START_Y - highestY)));
   updateScore();
 
-  // Recycle platforms: generate new ones above as camera moves up
-  // Remove platforms that are far below the camera, and add new above
   platforms = platforms.filter(p => p.y - cameraY < H + 200);
   while(platforms.length < MAX_PLATFORMS){
-    // Find highest platform y
     let topY = platforms.reduce((min, p)=>Math.min(min, p.y), Infinity);
-    if(topY === Infinity) topY = START_Y;
-    const newY = topY - rand(PLATFORM_GAP_MIN, PLATFORM_GAP_MAX);
-    const newX = rand(20, W - PLATFORM_WIDTH - 20);
-    platforms.push({x:newX, y:newY, w:PLATFORM_WIDTH, h:PLATFORM_HEIGHT, type:'normal'});
+    platforms.push({x: rand(20, W-120), y: topY - rand(60, 110), w: 100, h: 14, type:'normal'});
   }
-
-  // Game over when player falls below bottom of screen beyond a margin
-  if(player.y - cameraY > H + 80){
-    player.isAlive = false;
-    endGame();
-  }
+  if(player.y - cameraY > H + 80) endGame();
 }
 
-// Rendering
 function render(){
   ctx.clearRect(0,0,W,H);
-
-  // draw background buffer first (image or drawn tree)
-  if(bgImageLoaded) ctx.drawImage(bgCanvas, 0, 0, W, H);
-  else ctx.drawImage(bgCanvas, 0, 0, W, H);
-  // gentle overlay gradient to keep UI readable
-  const g = ctx.createLinearGradient(0,0,0,H);
-  g.addColorStop(0,'rgba(255,255,255,0.08)');
-  g.addColorStop(1,'rgba(220,245,235,0.06)');
-  ctx.fillStyle = g;
-  ctx.fillRect(0,0,W,H);
-
-  // Draw platforms
+  ctx.drawImage(bgImageLoaded ? bgImg : bgCanvas, 0, 0, W, H);
   ctx.fillStyle = '#79caa1';
-  ctx.strokeStyle = 'rgba(60,100,90,0.12)';
-  ctx.lineWidth = 2;
   for(let p of platforms){
-    const sy = p.y - cameraY; // screen y
-    // Simple rounded platform
     ctx.beginPath();
-    roundRect(ctx, p.x, sy, p.w, p.h, 6);
-    ctx.fill();
-    ctx.stroke();
+    const r = 6; const sy = p.y - cameraY;
+    ctx.roundRect(p.x, sy, p.w, p.h, r); ctx.fill();
   }
-
-  // Render lightweight particles and gifts (under/around player)
-  // Santa appears from the side and approaches player
-  renderSanta(ctx);
-
-  renderParticles(ctx);
-  renderGifts(ctx);
-
-  // Draw player or Santa depending on game state
-  const mx = player.x;
-  const my = player.y - cameraY;
+  renderSanta(ctx); renderParticles(ctx); renderGifts(ctx);
+  const mx = player.x, my = player.y - cameraY;
   if(gameOver){
-    // Draw bouncing santa-gift.jpg instead of the character when game is over
-    const bounce = Math.sin(tGlobal * 4) * 15; // bounce up and down
-    ctx.save();
-    ctx.translate(mx, my + bounce);
-    // draw the santa gift image larger for game over
-    const sw = 80, sh = 80;
-    if(giftImgLoaded){
-      try{ ctx.drawImage(giftImg, -sw/2, -sh/2, sw, sh); }catch(e){}
-    } else {
-      // fallback: large red gift box if image not loaded
-      ctx.fillStyle = '#d93030';
-      ctx.fillRect(-sw/2, -sh/2, sw, sh);
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(-sw*0.15, -sh/2, sw*0.3, sh);
-      ctx.fillRect(-sw/2, -sh*0.15, sw, sh*0.3);
-      ctx.beginPath(); ctx.moveTo(0, -sh*0.1); ctx.quadraticCurveTo(-sw*0.35, -sh*0.5, 0, -sh*0.35); ctx.quadraticCurveTo(sw*0.35, -sh*0.5, 0, -sh*0.1); ctx.fillStyle='#ffefef'; ctx.fill();
-      ctx.strokeStyle = 'rgba(0,0,0,0.08)'; ctx.strokeRect(-sw/2, -sh/2, sw, sh);
-    }
-    ctx.restore();
-  } else {
-    // body shadow
-    ctx.fillStyle = 'rgba(0,0,0,0.06)';
-    ctx.beginPath(); ctx.ellipse(mx+8,my+14,player.w*0.5,player.h*0.4,0,0,Math.PI*2); ctx.fill();
-
-    // Glow effect: soft, pulsing while jumping
-    const isJumping = player.vy < -0.6; // consider upward movement
-    const pulse = 1 + (isJumping ? 0.18 * Math.abs(Math.sin(tGlobal * 6)) : 0.06 * Math.abs(Math.sin(tGlobal * 2)));
-    const glowColor = 'rgba(180,220,255,0.9)';
-    ctx.save();
-    ctx.fillStyle = glowColor;
-    ctx.shadowColor = glowColor;
-    ctx.shadowBlur = 18 * pulse;
-    blobPath(ctx, mx, my, Math.max(player.w, player.h) * 0.6, 0.5);
-    ctx.fill();
-    ctx.restore();
-
-    if(player.imgLoaded && player.img){
-      // Draw image clipped to a soft blob shape for a rounded, organic look
-      const r = Math.max(player.w, player.h) * 0.5;
-      ctx.save();
-      blobPath(ctx, mx, my, r, 0.7); // build path
-      ctx.clip();
-      // draw the image fitted to the blob bounding box
-      ctx.drawImage(player.img, mx - player.w/2, my - player.h/2, player.w, player.h);
-      ctx.restore();
-      // gentle outline
-      ctx.strokeStyle = 'rgba(0,0,0,0.08)'; ctx.lineWidth = 2;
-      blobPath(ctx, mx, my, r, 0.7);
-      ctx.stroke();
-    } else {
-      // fallback simple cartoon circle (monkey-like)
-      // Draw fallback as a blob shape and then paint facial features
-      const r = Math.max(player.w, player.h) * 0.5;
-      ctx.fillStyle = '#8a5a34';
-      // apply subtle shadow for fallback blob
-      ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.08)'; ctx.shadowBlur = 8 * pulse; blobPath(ctx, mx, my, r, 0.3); ctx.fill(); ctx.restore();
-      // light face patch clipped softly
-      ctx.save();
-      blobPath(ctx, mx, my, r*0.62, -0.6);
-      ctx.clip();
-      ctx.fillStyle = '#f2d3b7';
-      ctx.fillRect(mx - r, my - r, r*2, r*2);
-      ctx.restore();
-      // eyes and smile (placed relative to mx,my)
-      ctx.fillStyle = '#2b2b2b';
-      ctx.beginPath(); ctx.arc(mx-6,my,2.8,0,Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(mx+2.5,my,2.8,0,Math.PI*2); ctx.fill();
-      ctx.strokeStyle = '#7b4f34'; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(mx-1, my+6, 6, 0.1, Math.PI-0.1); ctx.stroke();
-    }
-  }
-
-  // If game over, dim and show text
-  if(gameOver){
-    ctx.fillStyle = 'rgba(255,255,255,0.7)';
-    ctx.fillRect(40, H/2 - 70, W-80, 120);
-    ctx.fillStyle = '#123d2f';
-    ctx.font = '26px sans-serif'; ctx.textAlign='center';
+    const bounce = Math.sin(tGlobal * 4) * 15;
+    if(giftImgLoaded) ctx.drawImage(giftImg, mx-40, my+bounce-40, 80, 80);
+    ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.fillRect(40, H/2 - 70, W-80, 120);
+    ctx.fillStyle = '#123d2f'; ctx.font = '26px sans-serif'; ctx.textAlign='center';
     ctx.fillText('Game Over', W/2, H/2 - 20);
-    ctx.font = '16px sans-serif';
-    ctx.fillText('Press Restart to play again', W/2, H/2 + 12);
+    ctx.fillText('Tap to Restart', W/2, H/2 + 12);
+  } else {
+    ctx.fillStyle = 'rgba(0,0,0,0.06)'; ctx.beginPath(); ctx.ellipse(mx+8,my+14,18,14,0,0,Math.PI*2); ctx.fill();
+    if(player.imgLoaded){
+      ctx.save(); blobPath(ctx, mx, my, 24, 0.7); ctx.clip();
+      ctx.drawImage(player.img, mx-24, my-24, 48, 48); ctx.restore();
+    } else {
+      ctx.fillStyle = '#8a5a34'; ctx.beginPath(); ctx.arc(mx, my, 18, 0, Math.PI*2); ctx.fill();
+    }
   }
 }
 
-// Draw game over frame immediately
-function drawGameOver(){ render(); }
-
-// Simple helper to draw rounded rectangles
-function roundRect(ctx, x, y, w, h, r){
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
-  ctx.closePath();
-}
-
-// Create a slightly irregular rounded blob path centered at (x,y)
-// radius is r (approx), seed controls irregularity
 function blobPath(ctx, x, y, r, seed=0){
-  const points = [];
-  const n = 12;
-  for(let i=0;i<n;i++){
+  const n = 12; ctx.beginPath();
+  for(let i=0;i<=n;i++){
     const angle = (i/n) * Math.PI * 2;
-    // layered sin-based perturbations for soft irregularity
-    const perturb = 0.14 * Math.sin(angle*3 + seed) + 0.06 * Math.sin(angle*7 + seed*1.7);
-    const radius = r * (1 + perturb);
-    const px = x + Math.cos(angle) * radius;
-    const py = y + Math.sin(angle) * radius;
-    points.push({x:px,y:py});
-  }
-
-  ctx.beginPath();
-  ctx.moveTo(points[0].x, points[0].y);
-  for(let i=1;i<=n;i++){
-    const p = points[i % n];
-    const prev = points[(i-1) % n];
-    // use quadratic curve to smooth edges
-    const midX = (prev.x + p.x) * 0.5;
-    const midY = (prev.y + p.y) * 0.5;
-    ctx.quadraticCurveTo(prev.x, prev.y, midX, midY);
+    const radius = r * (1 + 0.14 * Math.sin(angle*3 + seed));
+    const px = x + Math.cos(angle) * radius, py = y + Math.sin(angle) * radius;
+    if(i===0) ctx.moveTo(px,py); else ctx.lineTo(px,py);
   }
   ctx.closePath();
 }
 
-// Main loop
-let lastTime = 0;
-let tGlobal = 0; // seconds timestamp
-let deltaTimeMs = 16.67; // ms between frames
-
-// Visual effect systems (lightweight)
-const particles = []; // jump burst particles
-const gifts = []; // collectible gifts
-
-// Spawn a small burst of particles beneath player when jumping
 function spawnJumpBurst(){
-  const count = 10;
-  const cx = player.x;
-  const cy = player.y + player.h*0.5;
-  for(let i=0;i<count;i++){
-    if(particles.length > 120) break; // cap
-    const angle = Math.PI + (Math.random()-0.5) * Math.PI * 0.6;
-    const speed = 1.6 + Math.random()*2.2;
-    particles.push({
-      x: cx + (Math.random()-0.5)*8,
-      y: cy + (Math.random()*6),
-      vx: Math.cos(angle)*speed,
-      vy: Math.sin(angle)*speed * 0.6 - 1.2,
-      life: 420 + Math.random()*260,
-      ttl: 420 + Math.random()*260,
-      size: 2 + Math.random()*3,
-      color: `rgba(170,220,255,${0.9 - Math.random()*0.5})`
-    });
-  }
+  for(let i=0;i<10;i++) particles.push({x:player.x, y:player.y+20, vx:rand(-2,2), vy:rand(-1,1), life:420, ttl:420, size:rand(2,5), color:'rgba(170,220,255,0.8)'});
 }
-
-// Spawn small collectible gifts around player when jumping
 function spawnGiftsOnJump(){
-  const count = 2 + Math.floor(Math.random()*2);
-  for(let i=0;i<count;i++){
-    if(gifts.length > 10) break;
-    const angle = (Math.random()*Math.PI*2);
-    const dist = 18 + Math.random()*28;
-    const gx = player.x + Math.cos(angle)*dist;
-    const gy = player.y + Math.sin(angle)*dist;
-    // choose Santa-themed type
-    const types = ['hat','box','snow'];
-    const type = types[Math.floor(Math.random()*types.length)];
-    const value = (type === 'snow') ? 10 : 40; // snowflakes smaller value
-    gifts.push({x:gx, y:gy, vx:(Math.random()-0.5)*0.6, vy:-0.6 - Math.random()*0.6, life:1800, ttl:1800, r:6 + Math.random()*4, value: value, type: type});
-  }
+  gifts.push({x:player.x, y:player.y, vx:rand(-0.5,0.5), vy:-1, life:1800, ttl:1800, r:8, value:40, type:'box'});
 }
 
-function updateParticles(dtMs){
+function updateParticles(dt){
   for(let i=particles.length-1;i>=0;i--){
-    const p = particles[i];
-    // simple physics
-    p.vy += 0.035 * (dtMs/16.67);
-    p.vx *= 0.995;
-    p.x += p.vx * (dtMs/16.67);
-    p.y += p.vy * (dtMs/16.67);
-    p.life -= dtMs;
-    if(p.life <= 0){ particles.splice(i,1); }
+    particles[i].y += 0.5; particles[i].life -= dt; if(particles[i].life<=0) particles.splice(i,1);
   }
 }
-
 function renderParticles(ctx){
-  for(const p of particles){
-    const a = Math.max(0, p.life / p.ttl);
-    // replace end alpha
-    const col = p.color.replace(/rgba\(([^,]+),([^,]+),([^,]+),([^\)]+)\)/, `rgba($1,$2,$3,${a})`);
-    ctx.fillStyle = col;
-    ctx.beginPath(); ctx.arc(p.x, p.y - cameraY, p.size, 0, Math.PI*2); ctx.fill();
-  }
+  particles.forEach(p => { ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y-cameraY, p.size, 0, Math.PI*2); ctx.fill(); });
 }
-
-function updateGifts(dtMs){
+function updateGifts(dt){
   for(let i=gifts.length-1;i>=0;i--){
-    const g = gifts[i];
-    g.vy += 0.02 * (dtMs/16.67);
-    g.x += g.vx * (dtMs/16.67);
-    g.y += g.vy * (dtMs/16.67);
-    // slight float sway
-    g.x += Math.sin((tGlobal + i)*3.1) * 0.2;
-    g.life -= dtMs;
-    if(g.life <= 0){ gifts.splice(i,1); continue; }
-    // collision with player (circle vs player circle)
-    const dx = g.x - player.x;
-    const dy = g.y - player.y;
-    const dist2 = dx*dx + dy*dy;
-    const rad = (g.r + Math.max(player.radius, player.w*0.5)) * 0.7;
-    if(dist2 <= rad*rad){
-      // collect
-      score += g.value;
-      updateScore();
-      // small pop particles
-      // sparkle effect on collect: add bright particles
-      for(let k=0;k<10;k++){
-        particles.push({x:g.x, y:g.y, vx:(Math.random()-0.5)*2.4, vy:(Math.random()-1.2)*2.4, life:220 + Math.random()*160, ttl:220 + Math.random()*160, size:1 + Math.random()*3, color: (Math.random()<0.5? 'rgba(255,240,180,0.95)' : 'rgba(255,180,230,0.95)')});
-      }
-      gifts.splice(i,1);
-    }
+    gifts[i].y += 0.5; gifts[i].life -= dt;
+    if(Math.hypot(gifts[i].x-player.x, gifts[i].y-player.y) < 30){ score+=gifts[i].value; gifts.splice(i,1); updateScore(); }
+    else if(gifts[i].life<=0) gifts.splice(i,1);
   }
+}
+function renderGifts(ctx){
+  gifts.forEach(g => { if(giftImgLoaded) ctx.drawImage(giftImg, g.x-g.r, g.y-cameraY-g.r, g.r*2, g.r*2); });
 }
 
-function renderGifts(ctx){
-  for(const g of gifts){
-    const a = Math.max(0, g.life / g.ttl);
-    ctx.save();
-    ctx.globalAlpha = a;
-    // draw simple gift box (square with ribbon)
-    ctx.translate(g.x, g.y - cameraY);
-    // render by type
-    if(g.type === 'box'){
-      if(giftImgLoaded){
-        // draw loaded santa gift image centered on gift
-        try{ ctx.drawImage(giftImg, -g.r, -g.r, g.r*2, g.r*2); }catch(e){ /* ignore draw errors */ }
-      } else {
-        // fallback: visible red gift box with white ribbon
-        ctx.fillStyle = '#d93030';
-        ctx.fillRect(-g.r, -g.r, g.r*2, g.r*2);
-        ctx.fillStyle = '#ffffff';
-        // vertical ribbon
-        ctx.fillRect(-g.r*0.15, -g.r, g.r*0.3, g.r*2);
-        // horizontal ribbon
-        ctx.fillRect(-g.r, -g.r*0.15, g.r*2, g.r*0.3);
-        // small bow
-        ctx.beginPath(); ctx.moveTo(0, -g.r*0.1); ctx.quadraticCurveTo(-g.r*0.35, -g.r*0.5, 0, -g.r*0.35); ctx.quadraticCurveTo(g.r*0.35, -g.r*0.5, 0, -g.r*0.1); ctx.fillStyle='#ffefef'; ctx.fill();
-        ctx.strokeStyle = 'rgba(0,0,0,0.08)'; ctx.strokeRect(-g.r, -g.r, g.r*2, g.r*2);
-      }
-    } else if(g.type === 'hat'){
-      // small Santa hat: triangle + white rim
-      ctx.fillStyle = '#d93030';
-      ctx.beginPath(); ctx.moveTo(-g.r, g.r*0.3); ctx.lineTo(0, -g.r); ctx.lineTo(g.r, g.r*0.3); ctx.closePath(); ctx.fill();
-      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.ellipse(0, g.r*0.45, g.r*0.5, g.r*0.28, 0, 0, Math.PI*2); ctx.fill();
-    } else { // snowflake
-      ctx.strokeStyle = '#bfe8ff'; ctx.lineWidth = 2;
-      for(let i=0;i<6;i++){
-        ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(0, -g.r*1.2); ctx.stroke(); ctx.rotate(Math.PI/3);
-      }
-      // reset transform rotation side-effect by restoring later
-    }
-    ctx.restore();
-  }
-}
 function loop(time){
   if(!running) return;
-  // compute time deltas
-  if(lastTime === 0) deltaTimeMs = 16.67;
-  else deltaTimeMs = time - lastTime;
-  tGlobal = time / 1000;
-  lastTime = time;
-  const dFrames = deltaTimeMs / 16.67;
-
-  // Physics and effects
-  updatePhysics(dFrames);
-  updateParticles(deltaTimeMs);
-  updateGifts(deltaTimeMs);
-  updateSanta(deltaTimeMs);
-  render();
-
-  animId = requestAnimationFrame(loop);
+  deltaTimeMs = time - lastTime || 16.67; lastTime = time; tGlobal = time/1000;
+  updatePhysics(1); updateParticles(deltaTimeMs); updateGifts(deltaTimeMs); updateSanta(deltaTimeMs);
+  render(); animId = requestAnimationFrame(loop);
 }
 
-// Input handling
-window.addEventListener('keydown', (e)=>{
-  if(e.code === 'ArrowLeft' || e.code === 'KeyA') keys.left = true;
-  if(e.code === 'ArrowRight' || e.code === 'KeyD') keys.right = true;
-  // Jump when SPACE or ArrowUp
-  if(e.code === 'Space' || e.code === 'ArrowUp'){
-    jump();
-  }
-});
-window.addEventListener('keyup', (e)=>{
-  if(e.code === 'ArrowLeft' || e.code === 'KeyA') keys.left = false;
-  if(e.code === 'ArrowRight' || e.code === 'KeyD') keys.right = false;
-});
-
-// Touch controls for mobile
+// --- دعم الموبايل (Touch Support) ---
 canvas.addEventListener('touchstart', (e) => {
   e.preventDefault();
-  jump();
-});
-jumpBtn.addEventListener('click', jump);
+  const touch = e.touches[0];
+  const rect = canvas.getBoundingClientRect();
+  const x = (touch.clientX - rect.left) * (canvas.width / rect.width);
+  
+  if (gameOver) { startGame(); return; }
 
-// UI wiring
+  if (x < canvas.width / 2) { keys.left = true; keys.right = false; }
+  else { keys.right = true; keys.left = false; }
+
+  if (player.canJump) {
+    player.vy = JUMP_VELOCITY; player.canJump = false;
+    spawnJumpBurst(); spawnGiftsOnJump();
+    try { jumpSound.currentTime = 0; jumpSound.play().catch(()=>{}); } catch(err){}
+  }
+}, {passive: false});
+
+canvas.addEventListener('touchend', () => { keys.left = false; keys.right = false; });
+
+window.addEventListener('keydown', (e)=>{
+  if(e.code==='ArrowLeft') keys.left=true; if(e.code==='ArrowRight') keys.right=true;
+  if((e.code==='Space'||e.code==='ArrowUp')){
+    if(gameOver) startGame();
+    else if(player.canJump){ player.vy=JUMP_VELOCITY; player.canJump=false; spawnJumpBurst(); spawnGiftsOnJump(); try{jumpSound.play()}catch(e){} }
+  }
+});
+window.addEventListener('keyup', (e)=>{ if(e.code==='ArrowLeft') keys.left=false; if(e.code==='ArrowRight') keys.right=false; });
+
 startBtn.addEventListener('click', ()=>{ startGame(); startBtn.disabled = true; });
 restartBtn.addEventListener('click', ()=>{ startBtn.disabled = false; startGame(); });
+function updateScore(){ scoreEl.textContent = score; }
 
-// Update DOM score
-function updateScore(){ scoreEl.textContent = String(score); }
-
-// Start with initial platforms
 resetGame();
-
-/* NOTES on physics and collisions:
- - Player always jumps when landing on platform: when player's bottom contacts platform top while falling (vy>0), set vy to jump velocity.
- - Camera follows the player upward by reducing cameraY when player screen position goes above threshold.
- - Platforms are stored in world coordinates (y decreases as we go up). cameraY translates to screen.
- - Score is proportional to how high the player has climbed from the starting Y.
-*/
-
 </script>
 </body>
 </html>
